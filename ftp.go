@@ -82,10 +82,26 @@ func DialTimeout(addr string, timeout time.Duration) (*ServerConn, error) {
 		features: make(map[string]string),
 	}
 
-	_, _, err = c.conn.ReadResponse(StatusReady)
-	if err != nil {
-		c.Quit()
-		return nil, err
+	fc := make(chan string, 1)
+	go func() {
+		_, _, err = c.conn.ReadResponse(StatusReady)
+		if err != nil {
+			c.Quit()
+			fc <- err.Error()
+			return
+		}
+
+		fc <- "ok"
+	}()
+
+	select {
+	case res := <- fc:
+		if res != "ok" {
+			return nil, errors.New(res)
+		}
+	case <-time.After(timeout + 5*time.Second):
+		c.conn.Close()
+		return nil, errors.New("Read response timeout!")
 	}
 
 	err = c.feat()
