@@ -522,6 +522,10 @@ func (e *Entry) setTime(fields []string) (err error) {
 	return
 }
 
+func (c *ServerConn) DisableEPSV() {
+	c.disableEPSV = true
+}
+
 // NameList issues an NLST FTP command.
 func (c *ServerConn) NameList(path string) (entries []string, err error) {
 	conn, err := c.cmdDataConnFrom(0, "NLST %s", path)
