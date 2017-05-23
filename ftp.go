@@ -82,26 +82,9 @@ func DialTimeout(addr string, timeout time.Duration) (*ServerConn, error) {
 		features: make(map[string]string),
 	}
 
-	fc := make(chan string, 1)
-	go func() {
-		_, _, err = c.conn.ReadResponse(StatusReady)
-		if err != nil {
-			c.Quit()
-			fc <- err.Error()
-			return
-		}
-
-		fc <- "ok"
-	}()
-
-	select {
-	case res := <- fc:
-		if res != "ok" {
-			return nil, errors.New(res)
-		}
-	case <-time.After(timeout + 5*time.Second):
-		c.conn.Close()
-		return nil, errors.New("Read response timeout!")
+	_, _, err = c.ReadResponse(StatusReady)
+	if err != nil {
+		return nil, err
 	}
 
 	err = c.feat()
@@ -269,7 +252,7 @@ func (c *ServerConn) cmd(expected int, format string, args ...interface{}) (int,
 		return 0, "", err
 	}
 
-	return c.conn.ReadResponse(expected)
+	return c.ReadResponse(expected)
 }
 
 // cmdDataConnFrom executes a command which require a FTP data connection.
@@ -294,7 +277,7 @@ func (c *ServerConn) cmdDataConnFrom(offset uint64, format string, args ...inter
 		return nil, err
 	}
 
-	code, msg, err := c.conn.ReadResponse(-1)
+	code, msg, err := c.ReadResponse(-1)
 	if err != nil {
 		conn.Close()
 		return nil, err
@@ -522,6 +505,10 @@ func (e *Entry) setTime(fields []string) (err error) {
 	return
 }
 
+func (c *ServerConn) DisableEPSV() {
+	c.disableEPSV = true
+}
+
 // NameList issues an NLST FTP command.
 func (c *ServerConn) NameList(path string) (entries []string, err error) {
 	conn, err := c.cmdDataConnFrom(0, "NLST %s", path)
@@ -645,7 +632,7 @@ func (c *ServerConn) StorFrom(path string, r io.Reader, offset uint64) error {
 		return err
 	}
 
-	_, _, err = c.conn.ReadResponse(StatusClosingDataConnection)
+	_, _, err = c.ReadResponse(StatusClosingDataConnection)
 	return err
 }
 
@@ -700,6 +687,32 @@ func (c *ServerConn) Logout() error {
 func (c *ServerConn) Quit() error {
 	c.conn.Cmd("QUIT")
 	return c.conn.Close()
+}
+
+// ReadResponse with timeout
+func (c *ServerConn) ReadResponse(expectCode int) (code int, message string, err error) {
+	errchan := make(chan error, 1)
+	go func() {
+		code, message, err = c.conn.ReadResponse(expectCode)
+		if err != nil {
+			c.Quit()
+			errchan <- err
+			return
+		}
+
+		errchan <- nil
+	}()
+
+	select {
+	case res := <- errchan:
+		if res != nil {
+			code, message, err = 0, res.Error(), res
+		}
+	case <-time.After(c.timeout + 5*time.Second):
+		c.conn.Close()
+		code,message,err = 0, "Read response timeout!", errors.New("Read response timeout!")
+	}
+	return
 }
 
 // Read implements the io.Reader interface on a FTP data connection.
