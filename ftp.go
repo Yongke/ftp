@@ -84,6 +84,7 @@ func DialTimeout(addr string, timeout time.Duration) (*ServerConn, error) {
 
 	_, _, err = c.ReadResponse(StatusReady)
 	if err != nil {
+		c.conn.Close()
 		return nil, err
 	}
 
@@ -695,7 +696,6 @@ func (c *ServerConn) ReadResponse(expectCode int) (code int, message string, err
 	go func() {
 		code, message, err = c.conn.ReadResponse(expectCode)
 		if err != nil {
-			c.Quit()
 			errchan <- err
 			return
 		}
@@ -708,7 +708,7 @@ func (c *ServerConn) ReadResponse(expectCode int) (code int, message string, err
 		if res != nil {
 			code, message, err = 0, res.Error(), res
 		}
-	case <-time.After(c.timeout + 5*time.Second):
+	case <-time.After(c.timeout + 30*time.Second):
 		c.conn.Close()
 		code,message,err = 0, "Read response timeout!", errors.New("Read response timeout!")
 	}
